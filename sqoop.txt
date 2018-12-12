@@ -1,0 +1,100 @@
+使用sqoop 将hive 中的数据导入mysql 中
+
+由于计算出来的结果存放的表有二级分区 ,在使用 sqoop 将hive 数据导入mysql 中会出错  ,而一级分区不会出错.
+
+有两种解决办法 :
+1)修改源码 : 网上有教程 ,本人没有进行相关实验,如果感兴趣,请自行实验 , 在此不赘述了
+2)将二级分区表或多重分区表的数据导入到新建的一级分区表中,再使用sqoop 对中间表的数据导入到mysql 中. 本人采用的是此方法
+
+--一级分区表可以直接导入,下面有sqoop 的脚本
+
+以日新维度表为例 
+(建表语句在 createTable.sql 中有)
+
+--- 在hive 中建表若不指定分割符时,会使用hive 默认的分割符 '\001'
+--日新维度表
+CREATE TABLE  dim_day_new_user_tmp(
+sdk_ver 		  string,
+app_ver_name 	  string,
+app_ver_code	  string,
+os_name		  string,
+city		  string,
+manufacture  	  string,
+nums	                   int
+)
+partitioned by (day string,dim string)
+row format delimited 
+fields terminated by ' '
+lines terminated by '\n'
+;
+
+---创建中间表
+CREATE TABLE  dim_day_new_user_tmp(
+sdk_ver 		  string,
+app_ver_name 	  string,
+app_ver_code	  string,
+os_name		  string,
+city		  string,
+manufacture	  string,
+nums		  int
+)
+partitioned by (day string)
+row format delimited 
+fields terminated by ' '
+lines terminated by '\n'
+;
+
+--向中间表导入数据
+insert into table dim_day_new_user_tmp partition(day = "2018-12-10")
+	select 
+	sdk_ver  		  ,
+	app_ver_name 	  ,
+    	app_ver_code	  ,
+	os_name		  ,	
+	city		  ,
+	manufacture	  ,
+	nums			  
+	from  dim_day_new_user_info
+	where day =  "2018-12-10" ;
+
+
+---在mysql 的数据库中创建对应的表
+create table IF NOT EXISTS dim_day_new_user_info(
+sdk_ver 		  varchar(50),
+app_ver_name 	  varchar(50),
+app_ver_code	  varchar(50),
+os_name		  varchar(50),
+city		  varchar(50),
+manufacture	  varchar(50),
+nums		  int
+
+)ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+
+
+
+------编写sqoop 脚本 ------    ( '\' 在shell 脚本里的行尾 代表换行 )
+
+sqoop export  \
+--connect "jdbc:mysql://Master:3306/olap?useUnicode=true&characterEncoding=utf-8" \
+--username JRhuang  \
+--password JRhuang  \
+--input-fields-terminated-by ' '  \
+--table dim_day_new_user_info   \
+--export-dir  /user/hive/warehouse/etl_tb.db/dim_day_new_user_tmp/day=2018-12-10/
+
+
+
+--赋予执行权限
+chmod u+x  filename   
+--执行脚本 
+./filename
+
+--在执行sqoop脚本 过程中 hadoop 回报警告,不用管,这是Hadoop的bug
+
+
+
+--在导入mysql 后可能会出现中文乱码,请指定connect 的编码为utf-8, 修改mysql 的默认编码为utf-8
+
+--其他的是二级分区表类似处理
+--一级分区直接导入mysql 中
